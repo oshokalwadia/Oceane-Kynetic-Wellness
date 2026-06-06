@@ -1,0 +1,169 @@
+const $ = (s) => document.querySelector(s);
+const num = (x, d=0) => (x===null||x===undefined||x==='') ? '–' : (+x).toFixed(d);
+
+function recoveryColor(p){
+  if(p===null||p===undefined) return 'var(--muted)';
+  if(p>=67) return 'var(--good)';
+  if(p>=34) return 'var(--warn)';
+  return 'var(--bad)';
+}
+
+function ring(pct, color){
+  const r=62, c=2*Math.PI*r, v=Math.max(0,Math.min(100,pct||0));
+  const off=c*(1-v/100);
+  return `<svg class="ring" viewBox="0 0 140 140">
+    <circle cx="70" cy="70" r="${r}" fill="none" stroke="var(--bg2)" stroke-width="12"/>
+    <circle cx="70" cy="70" r="${r}" fill="none" stroke="${color}" stroke-width="12"
+      stroke-linecap="round" stroke-dasharray="${c}" stroke-dashoffset="${off}"
+      transform="rotate(-90 70 70)"/>
+  </svg>`;
+}
+
+// 7-day bar sparkline
+function bars(values, color){
+  const v=values.filter(x=>x!==null&&x!==undefined&&x!=='');
+  if(!v.length) return '';
+  const max=Math.max(...v), min=Math.min(...v), span=(max-min)||1;
+  const n=values.length, w=100/n;
+  return `<svg class="spark" viewBox="0 0 100 34" preserveAspectRatio="none">`+
+    values.map((x,i)=>{
+      if(x===null||x===''||x===undefined) return '';
+      const h=6+28*((x-min)/span);
+      return `<rect x="${i*w+1}" y="${34-h}" width="${w-2}" height="${h}" rx="1.5" fill="${color}"/>`;
+    }).join('')+`</svg>`;
+}
+
+// simple 2-line chart (CTL vs ATL)
+function lineChart(ctl, atl){
+  const all=[...ctl,...atl].filter(x=>x!==null&&x!=='');
+  if(!all.length) return '';
+  const max=Math.max(...all,1), n=ctl.length, W=100, H=90;
+  const pts=(arr)=>arr.map((x,i)=>`${(i/(n-1||1))*W},${H-(x/max)*H}`).join(' ');
+  return `<svg class="chart" viewBox="0 0 100 90" preserveAspectRatio="none">
+    <polyline points="${pts(ctl)}" fill="none" stroke="var(--accent2)" stroke-width="2"/>
+    <polyline points="${pts(atl)}" fill="none" stroke="var(--warn)" stroke-width="2" stroke-dasharray="3 3"/>
+  </svg>`;
+}
+
+function macroBar(g, kcalPerG, total, color){
+  const pct = total ? Math.min(100,(g*kcalPerG/total)*100) : 0;
+  return `<span style="width:${pct}%;background:${color}"></span>`;
+}
+
+function render(data){
+  const rows=data.rows||[];
+  $('#hello').textContent = `Hey ${data.athlete||'athlete'}`;
+  $('#mode').innerHTML = `<span class="badge">${data.mode==='live'?'live data':'demo data'}</span>`;
+  if(!rows.length){ $('#content').innerHTML='<div class="skeleton">No data yet. Run the daily job.</div>'; return; }
+
+  const t=rows[rows.length-1];
+  const last7=rows.slice(-7);
+  $('#date').textContent = new Date(t.date+'T00:00').toLocaleDateString(undefined,
+    {weekday:'long',month:'short',day:'numeric'});
+
+  const rc=recoveryColor(+t.recovery_pct);
+  const calT=+t.cal_target||0;
+  const refuel = (+t.carbs_g*4) > (+t.cal_target*0.5);
+
+  $('#content').innerHTML = `
+    <section class="card hero">
+      <div class="ring-wrap">
+        ${ring(+t.recovery_pct, rc)}
+        <div class="val">
+          <div class="num" style="color:${rc}">${num(t.recovery_pct)}<small style="font-size:16px">%</small></div>
+          <div class="lbl">Recovery</div>
+        </div>
+      </div>
+      <div class="heros">
+        <div class="stat"><div class="k">Day Strain</div>
+          <div class="v">${num(t.strain,1)} <small>/ 21</small></div></div>
+        <div class="stat"><div class="k">Sleep</div>
+          <div class="v">${num(t.sleep_hours,1)}<small>h · ${num(t.sleep_performance_pct)}%</small></div></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h3>Biometrics</h3>
+      <div class="grid">
+        <div class="metric"><div class="k">HRV (7-day)</div>
+          <div class="v">${num(t.hrv_ms)}<small> ms</small></div>
+          ${bars(last7.map(r=>+r.hrv_ms),'var(--accent)')}</div>
+        <div class="metric"><div class="k">Resting HR</div>
+          <div class="v">${num(t.resting_hr)}<small> bpm</small></div>
+          ${bars(last7.map(r=>+r.resting_hr),'var(--accent2)')}</div>
+        <div class="metric"><div class="k">Sleep debt</div>
+          <div class="v">${num(t.sleep_debt_hours,1)}<small> h</small></div></div>
+        <div class="metric"><div class="k">TDEE burned</div>
+          <div class="v">${num(t.tdee)}<small> kcal</small></div></div>
+        <div class="metric"><div class="k">Respiratory</div>
+          <div class="v">${num(t.respiratory_rate,1)}<small> br/m</small></div></div>
+        <div class="metric"><div class="k">Calories out</div>
+          <div class="v">${num(t.calories_burned)}<small> kcal</small></div></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h3>Training Load · Performance Mgmt</h3>
+      <div class="pmc">
+        <div><div class="k">Fitness · CTL</div><div class="v">${num(t.ctl,1)}</div></div>
+        <div><div class="k">Fatigue · ATL</div><div class="v" style="color:var(--warn)">${num(t.atl,1)}</div></div>
+        <div><div class="k">Form · TSB</div><div class="v" style="color:${(+t.tsb)>=0?'var(--good)':'var(--bad)'}">${num(t.tsb,1)}</div></div>
+      </div>
+      ${lineChart(rows.map(r=>+r.ctl), rows.map(r=>+r.atl))}
+      <div style="font-size:11px;color:var(--muted);margin-top:6px">
+        <span style="color:var(--accent2)">▬ CTL</span> &nbsp;
+        <span style="color:var(--warn)">▬ ATL</span></div>
+    </section>
+
+    <section class="card">
+      <h3>Today's Fuel</h3>
+      <div class="cal">${num(t.cal_target)}<small> kcal target</small></div>
+      ${refuel?'<span class="tag">refuel / carb-load day</span>':''}
+      <div class="macros" style="margin-top:10px">
+        <div>
+          <div class="mrow"><span>Protein</span><b>${num(t.protein_g)} g</b></div>
+          <div class="bar">${macroBar(+t.protein_g,4,calT,'var(--accent)')}</div></div>
+        <div>
+          <div class="mrow"><span>Carbs</span><b>${num(t.carbs_g)} g</b></div>
+          <div class="bar">${macroBar(+t.carbs_g,4,calT,'var(--accent2)')}</div></div>
+        <div>
+          <div class="mrow"><span>Fat</span><b>${num(t.fat_g)} g</b></div>
+          <div class="bar">${macroBar(+t.fat_g,9,calT,'var(--warn)')}</div></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h3>Hydration</h3>
+      <div class="hyd">
+        <div class="drop">💧</div>
+        <div>
+          <div class="big">${num(t.water_l,1)} L</div>
+          <div class="sub">+ ${num(t.sodium_mg)} mg sodium today</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card coach">
+      <h3 style="color:#9fd0ff">Coach</h3>
+      <p>${(t.recommendation||'').replace(/</g,'&lt;')}</p>
+      <div class="by">AI-generated from today's recovery, load & fuel</div>
+    </section>
+  `;
+}
+
+async function load(){
+  try{
+    const r=await fetch('/api/data?days=14',{cache:'no-store'});
+    const data=await r.json();
+    render(data);
+  }catch(e){
+    $('#content').innerHTML='<div class="skeleton">Offline — showing nothing new. Pull to refresh when back online.</div>';
+  }
+}
+
+$('#refresh').addEventListener('click',load);
+load();
+
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('/service-worker.js').catch(()=>{});
+}
